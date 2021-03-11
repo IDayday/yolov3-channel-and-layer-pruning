@@ -8,7 +8,7 @@
 <br>
 
 ####  更新
-1.增加了对yolov3-spp结构的支持，基础训练可以直接使用yolov3-spp.weights初始化权重，各个层剪枝及通道剪枝脚本的使用也和yolov3一致。<br>
+1.增加了对**yolov3-spp**结构的支持，基础训练可以直接使用yolov3-spp.weights初始化权重，各个层剪枝及通道剪枝脚本的使用也和yolov3一致。<br>
 2.增加了多尺度推理支持，train.py和各剪枝脚本都可以指定命令行参数, 如 --img_size 608 .<br>
 3.2019/12/06更改了层剪枝的选层策略，由最大值排序改为均值排序。<br>
 4.2019/12/08**重要**更新，增加了**知识蒸馏**策略。蒸馏是用高精度的大模型指导低精度的小模型，在结构相似的情况下效果尤为明显。而剪枝得到的小模型和原模型在结构上高度相似，非常符合蒸馏的应用条件。这里更新了一个参考Hinton大神Distilling the Knowledge in a Neural Network的蒸馏策略，原策略是针对分类模型的，但在这里也有不错的表现。调用只需要在微调的时候指定老师模型的cfg和权重即可：--t_cfg  --t_weights。最近会更新第二种针对yolo检测的知识蒸馏策略。<br>
@@ -17,7 +17,13 @@
 7.2019/12/23更新了**知识蒸馏策略二**，并默认使用二。策略二参考了论文"Learning Efficient Object Detection Models with Knowledge Distillation"，相比策略一，对分类和回归分别作了处理，分类的蒸馏和策略一差不多，回归部分会分别计算学生和老师相对target的L2距离，如果学生更远，学生会再向target学习，而不是向老师学习。调用同样是指定老师的cfg和权重即可。需要强调的是，蒸馏在这里只是辅助微调，如果注重精度优先，剪枝时尽量剪不掉点的比例，这时蒸馏的作用也不大；如果注重速度，剪枝比例较大，导致模型精度下降较多，可以结合蒸馏提升精度。<br>
 8.2019/12/27更新了两种**稀疏策略**，详看下面稀疏训练环节。<br>
 9.2020/01/02修正各剪枝版本多分辨率推理test问题，主要是把命令行参数img_size传递给test函数。<br>
-10.2020/01/04补了个[博客](https://blog.csdn.net/weixin_41397123/article/details/103828931)分享**无人机数据集visdrone**案例，演示如何压缩一个12M的无人机视角目标检测模型（标题党）。
+10.2020/01/04补了个[博客](https://blog.csdn.net/weixin_41397123/article/details/103828931)分享**无人机数据集visdrone**案例，演示如何压缩一个12M的无人机视角目标检测模型（标题党）。<br>
+11.2020/04/10增加了**yolov3-tiny**的剪枝支持，稀疏照旧，剪通道用slim_prune.py，不可剪层。<br>
+12.2020/4/24增加支持**yolov4**剪枝.<br>
+13.2020/4/30在datasets.py 592行添加了支持负样本训练，默认注释掉.<br>
+14.2020/7/8更新支持**yolov4-tiny**剪通道.<br>
+
+
 
 #### 基础训练
 环境配置查看requirements.txt，数据准备参考[这里](https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data)，预训练权重可以从darknet官网下载。<br>
@@ -106,3 +112,6 @@ scale参数默认0.001，根据数据集，mAP,BN分布调整，数据分布广�
 ![finetune_and_bn](https://github.com/tanluren/yolov3-channel-and-layer-pruning/blob/master/data/img/finetune_and_bn.jpg)<br>
 可以猜测，剪枝得到的cfg是针对该数据集相对合理的结构，而保留的权重可以让模型快速训练接近这个结构的能力上限，这个过程类似于一种有限范围的结构搜索。而不同的训练策略，稀疏策略，剪枝策略会得到不同的结果，相信即使是这个例子也可以进一步压缩并保持良好精度。yolov3有众多优化项目和工程项目，可以利用这个剪枝得到的cfg和weights放到其他项目中做进一步优化和应用。<br>
 [这里](https://pan.baidu.com/s/1APUfwO4L69u28Wt9gFNAYw)分享了这个例子的权重和cfg，包括baseline，稀疏，不同剪枝设置后的结果。
+
+## License
+Apache 2.0

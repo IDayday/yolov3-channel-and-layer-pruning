@@ -21,8 +21,10 @@ def parse_module_defs(module_defs):
                 CBL_idx.append(i)
             else:
                 Conv_idx.append(i)
-            if module_defs[i+1]['type'] == 'maxpool':
-                #spp前一个CBL不剪
+            if module_defs[i+1]['type'] == 'maxpool' and module_defs[i+2]['type'] == 'route':
+                #spp前一个CBL不剪 区分tiny
+                ignore_idx.add(i)
+            if module_defs[i+1]['type'] == 'route' and 'groups' in module_defs[i+1]:
                 ignore_idx.add(i)
 
         elif module_def['type'] == 'shortcut':
@@ -56,8 +58,10 @@ def parse_module_defs2(module_defs):
                 CBL_idx.append(i)
             else:
                 Conv_idx.append(i)
-            if module_defs[i+1]['type'] == 'maxpool':
-                #spp前一个CBL不剪
+            if module_defs[i+1]['type'] == 'maxpool' and module_defs[i+2]['type'] == 'route':
+                #spp前一个CBL不剪 区分spp和tiny
+                ignore_idx.add(i)
+            if module_defs[i+1]['type'] == 'route' and 'groups' in module_defs[i+1]:
                 ignore_idx.add(i)
 
         elif module_def['type'] == 'upsample':
@@ -185,11 +189,17 @@ def get_input_mask(module_defs, idx, CBLidx2mask):
                 route_in_idxs.append(int(layer_i))
 
         if len(route_in_idxs) == 1:
-            return CBLidx2mask[route_in_idxs[0]]
+            mask = CBLidx2mask[route_in_idxs[0]]
+            if 'groups' in module_defs[idx - 1]:
+                return mask[(mask.shape[0]//2):]
+            return mask
 
         elif len(route_in_idxs) == 2:
             # return np.concatenate([CBLidx2mask[in_idx - 1] for in_idx in route_in_idxs])
-            mask1 = CBLidx2mask[route_in_idxs[0] - 1]
+            if module_defs[route_in_idxs[0]]['type'] == 'upsample': 
+                mask1 = CBLidx2mask[route_in_idxs[0] - 1]
+            elif module_defs[route_in_idxs[0]]['type'] == 'convolutional':
+                mask1 = CBLidx2mask[route_in_idxs[0]]
             if module_defs[route_in_idxs[1]]['type'] == 'convolutional':
                 mask2 = CBLidx2mask[route_in_idxs[1]]
             else:
@@ -204,7 +214,11 @@ def get_input_mask(module_defs, idx, CBLidx2mask):
         else:
             print("Something wrong with route module!")
             raise Exception
-
+    elif module_defs[idx - 1]['type'] == 'maxpool':  #tiny
+        if module_defs[idx - 2]['type'] == 'route':  #v4 tiny
+            return get_input_mask(module_defs, idx - 1, CBLidx2mask)
+        else:
+            return CBLidx2mask[idx - 2]  #v3 tiny
 
 def init_weights_from_loose_model(compact_model, loose_model, CBL_idx, Conv_idx, CBLidx2mask):
 
@@ -303,7 +317,10 @@ def prune_model_keep_size2(model, prune_idx, CBL_idx, CBLidx2mask):
                 mask = torch.from_numpy(CBLidx2mask[i]).cuda()
                 bn_module = pruned_model.module_list[i][1]
                 bn_module.weight.data.mul_(mask)
-                activation = F.leaky_relu((1 - mask) * bn_module.bias.data, 0.1)
+                if model_def['activation'] == 'leaky':
+                    activation = F.leaky_relu((1 - mask) * bn_module.bias.data, 0.1)
+                elif model_def['activation'] == 'mish':
+                    activation = (1 - mask) * bn_module.bias.data.mul(F.softplus(bn_module.bias.data).tanh())
                 update_activation(i, pruned_model, activation, CBL_idx)
                 bn_module.bias.data.mul_(mask)
             activations.append(activation)
@@ -323,11 +340,13 @@ def prune_model_keep_size2(model, prune_idx, CBL_idx, CBLidx2mask):
             from_layers = [int(s) for s in model_def['layers'].split(',')]
             activation = None
             if len(from_layers) == 1:
-                activation = activations[i + from_layers[0]]
+                activation = activations[i + from_layers[0] if from_layers[0] < 0 else from_layers[0]]
+                if 'groups' in model_def:
+                    activation = activation[(activation.shape[0]//2):]
                 update_activation(i, pruned_model, activation, CBL_idx)
             elif len(from_layers) == 2:
                 actv1 = activations[i + from_layers[0]]
-                actv2 = activations[from_layers[1]]
+                actv2 = activations[i + from_layers[1] if from_layers[1] < 0 else from_layers[1]]
                 activation = torch.cat((actv1, actv2))
                 update_activation(i, pruned_model, activation, CBL_idx)
             activations.append(activation)
@@ -339,8 +358,13 @@ def prune_model_keep_size2(model, prune_idx, CBL_idx, CBLidx2mask):
         elif model_def['type'] == 'yolo':
             activations.append(None)
 
-        elif model_def['type'] == 'maxpool':
-            activations.append(None)
+        elif model_def['type'] == 'maxpool':  #区分spp和tiny
+            if model.module_defs[i + 1]['type'] == 'route':
+                activations.append(None)
+            else:
+                activation = activations[i-1]
+                update_activation(i, pruned_model, activation, CBL_idx)
+                activations.append(activation)
        
     return pruned_model
 
